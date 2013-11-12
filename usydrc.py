@@ -12,6 +12,9 @@ from bs4 import BeautifulSoup
 from email.mime.text import MIMEText
 from getpass import getpass
 
+import ConfigParser
+import sys
+
 LOGIN_URL = "https://wasm.usyd.edu.au/login.cgi"
 DEG_ID_URL = "https://ssa.usyd.edu.au/ssa/examresults/courseselect.jsp"
 RESULTS_URL = "https://ssa.usyd.edu.au/ssa/examresults/courseresults.jsp"
@@ -21,6 +24,16 @@ LOGIN_DATA = {
 	'appID':'ssa-flexsis',
 	'Submit':'Log%20in',
 	'destURL': ""
+}
+
+conf_to_cred = {
+	"username": ("usyd", "unikey"),
+	"password": ("usyd", "password"),
+	"deg_id": ("usyd", "degree_id"),
+	"e_username": ("smtp", "username"),
+	"e_password": ("smtp", "password"),
+	"mailserver": ("smtp", "server"),
+	"mailport": ("smtp", "port"),  # ugh
 }
 
 # Typical results block CSS (the *only* means of identifying the results block...)
@@ -310,12 +323,70 @@ def get_user_details():
 	else:
 		creds = request_user_details()
 		write_user_details(creds)
+	print creds
 	return creds
 
+def verify_config(name):
+    if name is None:
+        return False
+    elif not os.path.isfile('config/' + name + ".cfg"):
+        print "That profile isn't associated with a config file."
+        print "Please fill in config/%s.cfg" % name
+        sys.exit()
+    else:
+        return True
+
+def read_config(name=None):
+    if not verify_config(name):
+		creds = request_user_details
+		write_user_details(creds)
+		return creds
+    else:
+		filename = 'config/' + name + '.cfg'
+		user_config = ConfigParser.ConfigParser()
+		user_config.readfp(open(filename))
+
+		creds = {}
+		for cred in conf_to_cred:
+			try:
+	   	 		creds[cred] = user_config.get(*conf_to_cred[cred])
+	   	 	except ConfigParser.NoSectionError:
+	   	 		print "Please fill in " + filename + " and add a " + conf_to_cred[cred][0] + " section"
+				sys.exit()
+			except ConfigParser.NoOptionError:
+				if cred == "deg_id":
+				    creds[cred] = None
+				else:
+					print "Please fill in " + filename + " and fill in the " + "/".join(conf_to_cred[cred]) + " field"
+					sys.exit()
+		if not creds['deg_id']:
+			creds['deg_id'] = get_degree_id(creds['username'], creds['password'])
+			if not creds['deg_id']:
+                # really?
+				print "Authentication failure! Delete " + filename
+		return creds
+
+def write_config_data(creds):
+	# isolate port/server, to write to config file
+	# yeah, i know it's a hack
+	creds['mailport'] = creds['mailserver'].split(":")[1]
+	creds['mailserver'] = creds['mailserver'].split(":")[0]
+	user_config = ConfigParser.ConfigParser()
+	for i in ("usyd", "smtp"):
+		user_config.add_section(i)
+	for cred in conf_to_cred:
+		user_config.set(conf_to_cred[cred][0], conf_to_cred[cred][1], creds[cred])
+	user_config.write(open('config/previous.cfg', 'w'))
+	print "Your details have been saved in config/previous.cfg"
 
 def main():
-	creds = get_user_details()
-
+	#creds = get_user_details()
+	creds = read_config('denbeigh')
+	creds['mailserver'] += ":" + creds['mailport']
+	# will fix when i have time
+	print creds
+	write_config_data(creds)
+	sys.exit()
 	print "Downloading the results page..."
 	page = get_results_page(creds['username'], creds['password'], creds['deg_id'])
 
